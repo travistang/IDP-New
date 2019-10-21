@@ -120,9 +120,38 @@ class SocialModel(nn.Module):
         list_hs = torch.stack(list_hs)
         # linear inference
         out = torch.relu(self.linear1(list_hs))
-        out = (self.linear2(out))
+        out = self.linear2(out)
 
         return out.transpose(1, 0), hs, cs
+
+class VanillaLSTMModel(nn.Module):
+    
+    def __init__(self, hidden_size, intermediate_hidden_size):
+        super(VanillaLSTMModel, self).__init__()
+        
+        self.lstm = nn.LSTMCell(2, hidden_size)
+
+        self.linear1 = nn.Linear(hidden_size, intermediate_hidden_size)
+        self.linear2 = nn.Linear(intermediate_hidden_size, 5)
+
+    def forward(self, x):
+        num_nodes = x.size(0)
+        num_steps = x.size(1)
+
+        if initial_states:
+            hs, cs = initial_states
+        else:
+            hs, cs = self.zero_initial_state(num_nodes)
+
+        list_hs = []
+        for ts in range(num_steps):
+            # the hs here should be "socialized" already
+            hs, cs = self.lstm(x[:, ts, ...], hs, cs)
+            list_hs.append(hs)
+        list_hs = torch.stack(list_hs)
+        # linear inference
+        out = torch.relu(self.linear1(list_hs))
+        out = self.linear2(out) 
 
 if __name__ == '__main__':
     import torch
