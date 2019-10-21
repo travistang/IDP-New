@@ -42,7 +42,7 @@ if __name__ == '__main__':
     from torch.autograd import Variable
     from torch.optim import Adam, SGD
     n = 20
-    initial_config = torch.randn(n, 5).double()
+    initial_config = torch.randn(n, 5)
     # initial_config[:, -1] /= 10
     # initial_config[:, 3] *= 
     pdf_configs = Variable(initial_config, requires_grad = True)
