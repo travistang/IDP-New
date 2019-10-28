@@ -7,21 +7,63 @@ from random import shuffle
 from torch.optim import Adam
 from tqdm import tqdm
 
-from plot import plot_normal
+from plot import plot_normal, plot_tracks
 
 import pandas as pd
 
 def main():
+    import matplotlib.pyplot as plt
     # load the data
     print("************* Loading Dataset ***************")
     # training_data = [np.random.rand(17, 20, 2) for _ in range(10)]
-    dataset = Dataset()
-    dataset.load_data('./data.h5')
-    training_data, testing_data = dataset.get_train_validation_batch(20)
+    # dataset = Dataset()
+    # dataset.load_data('./data.h5')
+    # training_data, testing_data = dataset.get_train_validation_batch(20)
 
-    # reduce the size of training data..
-    training_data = training_data[:100]
-    testing_data  = testing_data[:10]
+    # # reduce the size of training data..
+    # training_data = training_data[:100]
+    # testing_data  = testing_data[:10]
+    
+    # create some fake trajectories
+    # random starting point, constant, positive slope
+    num_trajectories = 3
+    trajectory_length = 20
+    min_step_length, max_step_length = 0.05, 0.1
+    
+    data = []
+    for i in range(num_trajectories):
+        trajectory = []
+
+        start_point = (np.random.rand(2) - 1) / 2 # start from somewhere at [-1, -0.5]
+        trajectory.append(start_point)
+
+        for _ in range(trajectory_length - 1):
+            '''
+                *----|-----*
+                |--a-|
+                |-----1----|
+
+                    *-------|-----------*
+                    |---c---|
+                    |---------d---------|
+
+                c / d = a => c = a * d
+            '''
+            slope = np.random.rand() * np.pi / 3 # some slope between (0, pi / 3): acute angle
+            step_length = np.random.rand() * (max_step_length - min_step_length) + min_step_length
+            point = trajectory[-1] # the previous point
+            trajectory.append((
+                point[0] + step_length * np.cos(slope), 
+                point[1] + step_length * np.sin(slope)
+            ))
+
+        data.append(trajectory)
+
+    training_data = np.array(data)
+    testing_data  = np.array(data)
+
+    plot_tracks(training_data)
+    plt.savefig('tracks.png')
 
     print("************* Preparing Model ***************")
     # prepare a model
@@ -35,6 +77,10 @@ def main():
     num_epochs = 10
     predict_length = 6
 
+    # preview of the inference of untrained models.
+    plt.clf()
+    plot_normal(infer(training_data, lstm_model, trajectory_length // 2))
+    plt.savefig('lstm_predict_before_train.png')
     # train the Social LSTM model
     # social_train_losses, social_test_losses = train_test(
     #     training_data, testing_data, 
@@ -43,7 +89,7 @@ def main():
     # write_loss_to_csv(
     #     social_train_losses, social_test_losses, 
     #     './social_loss.csv')
-
+    
     lstm_train_losses, lstm_test_losses = train_test(
         training_data, testing_data, 
         lstm_model, lstm_optimizer, num_epochs, predict_length)
@@ -52,11 +98,14 @@ def main():
         lstm_train_losses, lstm_test_losses, 
         './lstm_loss.csv')
     
-    # run once more for the test data to plot it.
-    display_data = testing_data[:1]
-    predicted = infer(display_data, lstm_model, 4)
-    # draw the first track
-    plot_normal(predicted[0])
+    predicted = infer(training_data, lstm_model, num_trajectories // 2)
+
+    # draw the prediction
+    plt.clf()
+    plot_normal(predicted)
+    plt.savefig('lstm_predict_after_train.png')
+
+    print("done!")
 
 def write_loss_to_csv(training_loss, testing_loss, csv_name):
     loss_data = {
@@ -87,20 +136,20 @@ def infer(data, model, predict_length):
     print("************* Inference ***************")
     device = 'gpu' if torch.cuda.is_available() else 'cpu'
     model.to(device)
-    for batch in tqdm(data, desc = "Inferencing..."):
-        batch = torch.from_numpy(batch).to(device).double()
-        # print(batch.shape)
-        observation, target = batch[:, :-(predict_length + 1)], batch[:, -predict_length:]
-        # print('target size', target.shape)
-        # beforehand
-        _, hs, cs = model(observation)
 
-        # predict steps
-        predicted, hs, cs = model(
-            torch.zeros(batch.size(0), predict_length, 2), 
-            (hs, cs))
+    batch = torch.from_numpy(data).to(device).double()
+    # print(batch.shape)
+    observation, target = batch[:, :-(predict_length + 1)], batch[:, -predict_length:]
+    
+    # beforehand
+    _, hs, cs = model(observation)
 
-    return predicted
+    # predict steps
+    predicted, hs, cs = model(
+        torch.zeros(batch.size(0), predict_length, 3), 
+        (hs, cs))
+        
+    return predicted 
 
 def test(testing_data, model, predict_length):
     print("************* Start Testing ***************")
