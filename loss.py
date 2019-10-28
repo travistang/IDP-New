@@ -41,15 +41,26 @@ if __name__ == '__main__':
     '''
     from torch.autograd import Variable
     from torch.optim import Adam, SGD
-    n = 20
-    initial_config = torch.randn(n, 5)
+    import matplotlib.pyplot as plt
+    from plot import plot_normal
+
+    n = 5
+    pdf_configs = torch.randn(n, 5).double().requires_grad_(True)
     # initial_config[:, -1] /= 10
     # initial_config[:, 3] *= 
-    pdf_configs = Variable(initial_config, requires_grad = True)
-    optimizer = Adam([pdf_configs], lr = 1e-3)
-    targets = torch.zeros(n, 2) # the dummy target coordinates
+    # pdf_configs = Variable(initial_config, requires_grad = True)
+    optimizer = Adam([pdf_configs], lr = 1e-2)
+    # targets = torch.stack((
+    #         torch.ones(n),
+    #         torch.zeros(n)
+    #     ), dim = 1)
+    targets = torch.randn(n, 2)
+    
     print('before training...')
-    print(pdf_configs.detach().numpy())
+    plot_normal(pdf_configs)
+    plt.savefig('before_train.png')
+    plt.clf()
+
     for i in range(1000):
         optimizer.zero_grad()
         losses = Gaussian2DLoss(targets, pdf_configs)
@@ -58,4 +69,6 @@ if __name__ == '__main__':
         losses.backward()
         optimizer.step()
     print('after training...')
-    print(pdf_configs.detach().numpy())
+    plot_normal(pdf_configs)
+    plt.savefig('after_train.png')
+    plt.clf()
