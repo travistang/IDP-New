@@ -7,7 +7,7 @@ from random import shuffle
 from torch.optim import Adam
 from tqdm import tqdm
 
-from plot import plot_normal
+#from plot import plot_normal
 
 import pandas as pd
 
@@ -20,15 +20,16 @@ def main():
     training_data, testing_data = dataset.get_train_validation_batch(20)
 
     # reduce the size of training data..
-    training_data = training_data[:100]
+    training_data = training_data[:1000]
     testing_data  = testing_data[:10]
 
     print("************* Preparing Model ***************")
     # prepare a model
     model = SocialModel()
     lstm_model = VanillaLSTMModel(128, 64)
+
     # and the optimizer
-    lr = 7e-4
+    lr = 1e-4
     optimizer = Adam(model.parameters(), lr)
     lstm_optimizer = Adam(lstm_model.parameters(), lr)
 
@@ -36,13 +37,13 @@ def main():
     predict_length = 6
 
     # train the Social LSTM model
-    # social_train_losses, social_test_losses = train_test(
-    #     training_data, testing_data, 
-    #     model, optimizer, num_epochs, predict_length)
+    social_train_losses, social_test_losses = train_test(
+        training_data, testing_data, 
+        model, optimizer, num_epochs, predict_length)
     
-    # write_loss_to_csv(
-    #     social_train_losses, social_test_losses, 
-    #     './social_loss.csv')
+    write_loss_to_csv(
+        social_train_losses, social_test_losses, 
+        './social_loss.csv')
 
     lstm_train_losses, lstm_test_losses = train_test(
         training_data, testing_data, 
@@ -52,11 +53,11 @@ def main():
         lstm_train_losses, lstm_test_losses, 
         './lstm_loss.csv')
     
-    # run once more for the test data to plot it.
-    display_data = testing_data[:1]
-    predicted = infer(display_data, lstm_model, 4)
-    # draw the first track
-    plot_normal(predicted[0])
+    print('Comparison: Social LSTM loss: {}, Vanilla LSTM loss: {}'.format(np.mean(social_test_losses), np.mean(lstm_test_losses)))
+
+    # save model
+    torch.save(model.state_dict(), 'social_lstm.pth')
+    torch.save(lstm_model.state_dict(), 'lstm.pth')
 
 def write_loss_to_csv(training_loss, testing_loss, csv_name):
     loss_data = {
@@ -71,7 +72,7 @@ def train_test(training_data, testing_data, model, optimizer, num_epochs, predic
     testing_history  = []
 
     for epoch in range(num_epochs):
-        training_loss = train(training_data, model, optimizer, num_epochs, predict_length)
+        training_loss = train(training_data, model, optimizer, epoch, predict_length)
         testing_loss  = test(testing_data, model, predict_length)
         
         training_history.append(training_loss)
@@ -85,7 +86,8 @@ def train_test(training_data, testing_data, model, optimizer, num_epochs, predic
 
 def infer(data, model, predict_length):
     print("************* Inference ***************")
-    device = 'gpu' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     model.to(device)
     for batch in tqdm(data, desc = "Inferencing..."):
         batch = torch.from_numpy(batch).to(device).double()
@@ -97,59 +99,74 @@ def infer(data, model, predict_length):
 
         # predict steps
         predicted, hs, cs = model(
-            torch.zeros(batch.size(0), predict_length, 2), 
+            torch.zeros(batch.size(0), predict_length, 2).to(device), 
             (hs, cs))
 
     return predicted
 
 def test(testing_data, model, predict_length):
     print("************* Start Testing ***************")
-    device = 'gpu' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
     total_loss = 0
+    total_batches = 0
     for batch in tqdm(testing_data, desc = "Testing on validation set..."):
         batch = torch.from_numpy(batch).to(device).double()
         # print(batch.shape)
         observation, target = batch[:, :-(predict_length + 1)], batch[:, -predict_length:]
+        # add one extra dimension indicating the sequence is beginning
+        pad = torch.ones(*observation.shape[:-1], 1).to(device).double()
+        observation = torch.cat((observation, pad), axis = 2)
         # print('target size', target.shape)
         # beforehand
         _, hs, cs = model(observation)
 
         # predict steps
         predicted, hs, cs = model(
-            torch.zeros(batch.size(0), predict_length, 2), 
+            torch.zeros(batch.size(0), predict_length, 3).to(device), 
             (hs, cs))
         
         loss = SocialModelLoss(predicted, target)
-        total_loss += loss.item()
+        num_batches = observation.size(0)
+        total_loss += loss.item() * num_batches
+        total_batches += num_batches
 
-    return total_loss / len(testing_data)
+    return total_loss / total_batches
 
 def train(training_data, model, optimizer, num_epochs, predict_length):
     print("************* Start Training ***************")
     
-    device = 'gpu' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print('training on {}'.format(device))
     model.to(device)
 
     shuffle(training_data)
+
     total_loss = 0
-    for batch in tqdm(training_data):
+    total_batches = 0
+
+    pbar = tqdm(training_data)
+    for batch in pbar:
         batch = torch.from_numpy(batch).to(device).double()
         # print(batch.shape)
         observation, target = batch[:, :-(predict_length + 1)], batch[:, -predict_length:]
-        # print('target size', target.shape)
+        # add one extra dimension indicating the sequence is beginning
+        pad = torch.ones(*observation.shape[:-1], 1).to(device).double()
+        observation = torch.cat((observation, pad), axis = 2)
+
         # beforehand
         _, hs, cs = model(observation)
 
         # predict steps
         predicted, hs, cs = model(
-            torch.zeros(batch.size(0), predict_length, 2), 
+            torch.zeros(batch.size(0), predict_length, 3).to(device), 
             (hs, cs))
 
         # print('predicted', predicted.shape)
         loss = SocialModelLoss(predicted, target)
-        total_loss += loss.item()
-
+        num_batches = observation.size(0)
+        total_loss += loss.item() * num_batches
+        total_batches += num_batches
         # compute gradient
         loss.backward()
 
@@ -159,7 +176,10 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
         # updating step        
         optimizer.step()
 
-    return total_loss / len(training_data)
+        # update progress bar
+        pbar.set_description('Epoch: {}, loss: {}'.format(num_epochs, total_loss / total_batches))
+
+    return total_loss / total_batches
         
 if __name__ == '__main__':
     torch.set_default_tensor_type(torch.DoubleTensor)
