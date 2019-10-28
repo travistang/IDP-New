@@ -16,56 +16,60 @@ class SocialLSTM(nn.Module):
         self.num_grids = num_grids
         self.grid_range = grid_range
         # define social LSTM layers
-        self.lstm = nn.LSTMCell(2, hidden_size)
+        self.lstm = nn.LSTMCell(3, hidden_size)
         
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     def social_layer(self, old_hidden_state, coords):
         '''
             Given an old hidden state of shape (n, hs) and coordinates of shape (n, 2),
             Return a new hidden state of shape (n, hs)
         '''
-        coords = coords.clone()
+        coords = coords.clone().to(self.device)
         coords[:, 0] = coords[:, 0].clamp(*self.grid_range[0])
         coords[:, 1] = coords[:, 1].clamp(*self.grid_range[1])
         # First make a dictionary to store all possible grids
         total_length_x = self.grid_range[0][1] - self.grid_range[0][0]
         total_length_y = self.grid_range[1][1] - self.grid_range[1][0]
         x_min, y_min = self.grid_range[0][0], self.grid_range[1][0]
-        # create a social dict
-        social_dict = dict()
-        batch_size = old_hidden_state.size(0)
-        for i in range(self.num_grids):
-            for j in range(self.num_grids):
-                x_grid = (x_min + (total_length_x / self.num_grids) * i, x_min + (total_length_x / self.num_grids) * (i + 1))
-                y_grid = (y_min + (total_length_y / self.num_grids) * j, y_min + (total_length_y / self.num_grids) * (j + 1))
+        dx, dy = total_length_x / self.num_grids, total_length_y / self.num_grids
 
-                social_dict[(x_grid, y_grid)] = [
-                    torch.zeros(1, self.hidden_size),
-                    [] # list of indices contributing to this grid.
-                ]
+        # create a social dict
+        social_dict = [[
+         [ torch.zeros(1, self.hidden_size).to(self.device), []]
+         for j in range(self.num_grids)   
+        ] for j in range(self.num_grids)]
 
         # helper function for locating the grid
         def get_grid_by_coordinates(c):
-            for grid in social_dict.keys():
-                if (grid[0][0] <= c[0] <= grid[0][1]) and (grid[1][0] <= c[1] <= grid[1][1]):
-                    return grid 
+            x, y, _ = c.cpu().clone().numpy()
+
+            x_ind = min(max(int((x - x_min) // dx), 0), self.num_grids - 1)
+            y_ind = min(max(int((y - y_min) // dy), 0), self.num_grids - 1)
+            try:
+                return social_dict[x_ind][y_ind]
+            except IndexError:
+                breakpoint()
+                return None
 
         # now iterate each "batch" (node in this particular timestamp), and accumulate the corresponding state at the social_dict
         for idx, hidden_state in enumerate(torch.split(old_hidden_state, 1, dim = 0)):
             grid = get_grid_by_coordinates(coords[idx])
             
-            if not grid or grid not in social_dict: 
+            if not grid: 
                 # if there are no grids found...
                 raise ValueError("Failed to find any grids for the coordinate: {}".format(coords[idx]))
 
             # accumulate hidden state
-            social_dict[grid][0] += old_hidden_state[idx]
+            grid[0] += old_hidden_state[idx]
             # mark down the idx used here
-            social_dict[grid][1].append(idx)
+            grid[1].append(idx)
 
         # now distribute back
         new_hidden_state = old_hidden_state.clone()
-        for grid, (social_hidden_state, ids) in social_dict.items():
-            new_hidden_state[ids] = social_hidden_state
+        for i in range(self.num_grids):
+            for j in range(self.num_grids):
+                social_hidden_state, ids = social_dict[i][j]
+                new_hidden_state[ids] = social_hidden_state
         
         return new_hidden_state
 
@@ -96,7 +100,8 @@ class SocialModel(nn.Module):
         self.linear2 = nn.Linear(self.linear_intermediate_size, 5)
 
     def zero_initial_state(self, num_nodes):
-        return torch.zeros((num_nodes, self.hidden_size)), torch.zeros((num_nodes, self.hidden_size))
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        return torch.zeros((num_nodes, self.hidden_size)).to(device), torch.zeros((num_nodes, self.hidden_size)).to(device)
     
     def forward(self, x, initial_states = None):
         '''
@@ -120,7 +125,7 @@ class SocialModel(nn.Module):
         list_hs = torch.stack(list_hs)
         # linear inference
         out = torch.relu(self.linear1(list_hs))
-        out = torch.tanh(self.linear2(out))
+        out = self.linear2(out)
 
         return out.transpose(1, 0), hs, cs
 
@@ -129,7 +134,7 @@ class VanillaLSTMModel(nn.Module):
     def __init__(self, hidden_size, intermediate_hidden_size):
         super(VanillaLSTMModel, self).__init__()
 
-        self.lstm = nn.LSTMCell(2, hidden_size)
+        self.lstm = nn.LSTMCell(3, hidden_size)
 
         self.hidden_size = hidden_size
 
@@ -137,7 +142,8 @@ class VanillaLSTMModel(nn.Module):
         self.linear2 = nn.Linear(intermediate_hidden_size, 5)
     
     def zero_initial_state(self, num_nodes):
-        return torch.zeros((num_nodes, self.hidden_size)), torch.zeros((num_nodes, self.hidden_size))
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        return torch.zeros((num_nodes, self.hidden_size)).to(device), torch.zeros((num_nodes, self.hidden_size)).to(device)
     
     def forward(self, x, initial_states = None):
         num_nodes = x.size(0)
@@ -156,7 +162,7 @@ class VanillaLSTMModel(nn.Module):
         list_hs = torch.stack(list_hs)
         # linear inference
         out = torch.relu(self.linear1(list_hs))
-        out = torch.tanh(self.linear2(out))
+        out = self.linear2(out)
 
         return out.transpose(1, 0), hs, cs
 if __name__ == '__main__':
