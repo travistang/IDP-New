@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 class SocialLSTM(nn.Module):
 
-    def __init__(self, hidden_size, grid_range, num_grids):
+    def __init__(self, hidden_size, grid_range, num_grids, embedding_size = 64):
         '''
             Initialize the Social LSTM
             grid_range: the minimum and maximum of the grid the coordinates lies in, would be [(x_min, x_max), (y_min, y_max)]
@@ -15,10 +15,12 @@ class SocialLSTM(nn.Module):
         self.hidden_size = hidden_size
         self.num_grids = num_grids
         self.grid_range = grid_range
+
         # define social LSTM layers
-        self.lstm = nn.LSTMCell(3, hidden_size)
+        self.lstm = nn.LSTMCell(embedding_size, hidden_size)
         
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     def social_layer(self, old_hidden_state, coords):
         '''
             Given an old hidden state of shape (n, hs) and coordinates of shape (n, 2),
@@ -36,8 +38,8 @@ class SocialLSTM(nn.Module):
         # create a social dict
         social_dict = [[
          [ torch.zeros(1, self.hidden_size).to(self.device), []]
-         for j in range(self.num_grids)   
-        ] for j in range(self.num_grids)]
+            for j in range(self.num_grids)]
+            for j in range(self.num_grids)]
 
         # helper function for locating the grid
         def get_grid_by_coordinates(c):
@@ -73,37 +75,46 @@ class SocialLSTM(nn.Module):
         
         return new_hidden_state
 
-    def forward(self, coords, hidden_state, cell_state):
+    def forward(self, embedding, coords, hidden_state, cell_state):
         '''
             Forward one step of coordinates of size (num_batch, 2) into this Social LSTM
             return the hidden state and cell state after it is passed
         '''
-        # initial states
-        # hidden_state, cell_state = torch.zeros(num_batch, self.hidden_size), torch.zeros(num_batch, self.hidden_size)
-        hidden_state, cell_state = self.lstm(coords, (hidden_state, cell_state))
         # social layer
         hidden_state = self.social_layer(hidden_state, coords)
+
+        # initial states
+        # hidden_state, cell_state = torch.zeros(num_batch, self.hidden_size), torch.zeros(num_batch, self.hidden_size)
+        hidden_state, cell_state = self.lstm(embedding, (hidden_state, cell_state))
 
         return hidden_state, cell_state
 
 class SocialModel(nn.Module):
     
-    def __init__(self):
+    def __init__(self, embedding_size = 64):
         super(SocialModel, self).__init__()
 
+        self.embedding_size = embedding_size
         self.hidden_size = 128
         self.linear_intermediate_size = 64
 
-        self.slstm = SocialLSTM(self.hidden_size, [(-1, 1), (-1, 1)], 7)
+        # coordinates to embedding
+        self.wr = nn.Linear(3, embedding_size)
 
-        self.linear1 = nn.Linear(self.hidden_size, self.linear_intermediate_size)
-        self.linear2 = nn.Linear(self.linear_intermediate_size, 5)
+        # embedding pooling and embedding transform (We)
+        self.slstm = SocialLSTM(self.hidden_size, [(-1, 1), (-1, 1)], 8, embedding_size = embedding_size)
+
+        # mapping from hidden state to 2D gaussian prediction
+        self.wp = nn.Linear(self.hidden_size, 5)
 
     def zero_initial_state(self, num_nodes):
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         return torch.zeros((num_nodes, self.hidden_size)).to(device), torch.zeros((num_nodes, self.hidden_size)).to(device)
+
+    def num_params(self):
+        return sum([p.numel() for p in self.parameters()]) 
     
-    def forward(self, x, initial_states = None):
+    def forward(self, x, initial_states = None, initial_coordinates = None):
         '''
             TODO: this
             Given input tensor of shape (batch_size, seq_length, 2), 
@@ -111,6 +122,8 @@ class SocialModel(nn.Module):
         '''
         num_nodes = x.size(0)
         num_steps = x.size(1)
+
+        embed = torch.relu(self.wr(x))
 
         if initial_states:
             hs, cs = initial_states
@@ -120,34 +133,56 @@ class SocialModel(nn.Module):
         list_hs = []
         for ts in range(num_steps):
             # the hs here should be "socialized" already
-            hs, cs = self.slstm(x[:, ts, ...], hs, cs)
-            list_hs.append(hs)
-        list_hs = torch.stack(list_hs)
-        # linear inference
-        out = torch.relu(self.linear1(list_hs))
-        out = self.linear2(out)
+            hs, cs = self.slstm(embed[:, ts, ...], x[:, ts, ...], hs, cs)
 
-        return out.transpose(1, 0), hs, cs
+            list_hs.append(hs)
+
+        # collect hidden states across differen timestamps            
+        list_hs = torch.stack(list_hs)
+
+        # linear inference
+        out = self.wp(list_hs)
+
+        out = out.transpose(1, 0)
+
+        # predict relative velocity instead of the absolute coordinates
+        out = torch.cumsum(out, dim = 2)
+        # out[..., :2] = torch.cumsum(out[..., :2], dim = 2)
+
+        # additionally, if the coordinates start with somewhere, add it.
+        if initial_coordinates is not None:
+            out[..., :2] += initial_coordinates
+
+        return out, hs, cs
 
 class VanillaLSTMModel(nn.Module):
     
-    def __init__(self, hidden_size, intermediate_hidden_size):
+    def __init__(self, hidden_size, intermediate_hidden_size, encoding_size = 64):
         super(VanillaLSTMModel, self).__init__()
 
-        self.lstm = nn.LSTMCell(3, hidden_size)
+        self.wr = nn.Linear(3, encoding_size)
+        
+        self.lstm = nn.LSTMCell(encoding_size, hidden_size)
 
         self.hidden_size = hidden_size
 
-        self.linear1 = nn.Linear(hidden_size, intermediate_hidden_size)
-        self.linear2 = nn.Linear(intermediate_hidden_size, 5)
+        self.wp = nn.Linear(hidden_size, 5)
+        # self.linear1 = nn.Linear(hidden_size, intermediate_hidden_size)
+        # self.linear2 = nn.Linear(intermediate_hidden_size, 5)
     
     def zero_initial_state(self, num_nodes):
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         return torch.zeros((num_nodes, self.hidden_size)).to(device), torch.zeros((num_nodes, self.hidden_size)).to(device)
     
-    def forward(self, x, initial_states = None):
+    def num_params(self):
+        return sum([p.numel() for p in self.parameters()])
+
+    def forward(self, x, initial_states = None, initial_coordinates = None):
         num_nodes = x.size(0)
         num_steps = x.size(1)
+
+        # encodings
+        x = torch.relu(self.wr(x))
 
         if initial_states:
             hs, cs = initial_states
@@ -158,13 +193,25 @@ class VanillaLSTMModel(nn.Module):
         for ts in range(num_steps):
             # the hs here should be "socialized" already
             hs, cs = self.lstm(x[:, ts, ...], (hs, cs))
-            list_hs.append(hs)
-        list_hs = torch.stack(list_hs)
-        # linear inference
-        out = torch.relu(self.linear1(list_hs))
-        out = self.linear2(out)
 
-        return out.transpose(1, 0), hs, cs
+            list_hs.append(hs)
+
+        list_hs = torch.stack(list_hs)
+
+        # linear inference
+        out = self.wp(list_hs)
+
+        out = out.transpose(1, 0)
+
+        # accumulate relative vector to get location
+        out = torch.cumsum(out, dim = 2)
+        # out[..., :2] = torch.cumsum(out[..., :2], dim = 2)
+
+        if initial_coordinates is not None:
+            out[..., :2] += initial_coordinates
+
+        return out, hs, cs
+
 if __name__ == '__main__':
     import torch
     # from loss import Gaussian2DLoss
@@ -175,7 +222,7 @@ if __name__ == '__main__':
     num_steps = 8
     batch_size = 20
     hidden_size = 128
-    dummy_dataset = torch.randn(batch_size, num_steps, 2).clamp(-1, 1)
+    dummy_dataset = torch.randn(batch_size, num_steps, 3).clamp(-1, 1)
 
     slstm = SocialLSTM(hidden_size, grid_range, num_grids)
 
