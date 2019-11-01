@@ -107,9 +107,13 @@ class SocialModel(nn.Module):
         # mapping from hidden state to 2D gaussian prediction
         self.wp = nn.Linear(self.hidden_size, 5)
 
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     def zero_initial_state(self, num_nodes):
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        return torch.zeros((num_nodes, self.hidden_size)).to(device), torch.zeros((num_nodes, self.hidden_size)).to(device)
+        return (
+            torch.zeros((num_nodes, self.hidden_size)).to(self.device), 
+            torch.zeros((num_nodes, self.hidden_size)).to(self.device)
+        )
 
     def num_params(self):
         return sum([p.numel() for p in self.parameters()]) 
@@ -151,7 +155,7 @@ class SocialModel(nn.Module):
 
         # additionally, if the coordinates start with somewhere, add it.
         if initial_coordinates is not None:
-            out[..., :2] += initial_coordinates
+            out[..., :2] += initial_coordinates.unsqueeze(1)
 
         return out, hs, cs
 
@@ -167,12 +171,14 @@ class VanillaLSTMModel(nn.Module):
         self.hidden_size = hidden_size
 
         self.wp = nn.Linear(hidden_size, 5)
-        # self.linear1 = nn.Linear(hidden_size, intermediate_hidden_size)
-        # self.linear2 = nn.Linear(intermediate_hidden_size, 5)
     
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     def zero_initial_state(self, num_nodes):
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        return torch.zeros((num_nodes, self.hidden_size)).to(device), torch.zeros((num_nodes, self.hidden_size)).to(device)
+        return (
+            torch.zeros((num_nodes, self.hidden_size)).to(self.device), 
+            torch.zeros((num_nodes, self.hidden_size)).to(self.device)
+        ) 
     
     def num_params(self):
         return sum([p.numel() for p in self.parameters()])
@@ -208,7 +214,7 @@ class VanillaLSTMModel(nn.Module):
         # out[..., :2] = torch.cumsum(out[..., :2], dim = 2)
 
         if initial_coordinates is not None:
-            out[..., :2] += initial_coordinates
+            out[..., :2] += initial_coordinates.unsqueeze(1)
 
         return out, hs, cs
 

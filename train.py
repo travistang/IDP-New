@@ -3,10 +3,9 @@ import numpy as np
 from models import SocialLSTM, SocialModel, VanillaLSTMModel
 from loss import Gaussian2DLoss, SocialModelLoss
 from data import Dataset
-from random import shuffle
+from random import shuffle, choice
 from torch.optim import Adam
 from tqdm import tqdm
-
 
 
 import pandas as pd
@@ -14,34 +13,17 @@ import pandas as pd
 def plot_inference(data, model, prediction_length, fname):
     import matplotlib.pyplot as plt
     from plot import plot_normal, plot_tracks
-
     plt.clf()
-    for track in infer(
+    predictions = infer(
         data[:, :-prediction_length], 
-        model, prediction_length).split(1, dim = 0):
-        plot_normal(track[0])
+        model, prediction_length).split(1, dim = 0)
+
+    for track in predictions:
+        plot_normal(track[0]) 
     plot_tracks(data)
     plt.savefig(fname)
 
-def main():
-    # load the data
-    print("************* Loading Dataset ***************")
-    # training_data = [np.random.rand(17, 20, 2) for _ in range(10)]
-    # dataset = Dataset()
-    # dataset.load_data('./data.h5')
-    # training_data, testing_data = daptaset.get_train_validation_batch(20)
-
-    # # reduce the size of training data..
-    # training_data = training_data[:100]
-    # testing_data  = testing_data[:10]
-    
-    # create some fake trajectories
-    # random starting point, constant, positive slope
-    num_trajectories = 1
-    trajectory_length = 20
-    prediction_length = trajectory_length // 4
-    min_step_length, max_step_length = 0.05, 0.1
-    
+def generate_fake_data(num_trajectories, trajectory_length, prediction_length, min_step_length, max_step_length):
     data = []
     for i in range(num_trajectories):
         trajectory = []
@@ -74,6 +56,25 @@ def main():
     training_data = np.array(data)
     testing_data  = np.array(data)
 
+    return training_data, testing_data
+
+def main():
+    
+    # metadata for training
+    trajectory_length = 20
+    prediction_length = trajectory_length // 2
+
+    # load the data
+    print("************* Loading Dataset ***************")
+    # training_data = [np.random.rand(17, 20, 2) for _ in range(10)]
+    dataset = Dataset()
+    dataset.load_data('./data.h5')
+    training_data, testing_data = dataset.get_train_validation_batch(trajectory_length)
+
+    # # reduce the size of training data..
+    training_data = training_data[:1000]
+    testing_data  = testing_data[:100]
+
     print("************* Preparing Model ***************")
 
     # prepare a model
@@ -85,18 +86,18 @@ def main():
     optimizer = Adam(model.parameters(), lr)
     lstm_optimizer = Adam(lstm_model.parameters(), lr)
 
+    # training config
     num_epochs = 100
-    predict_length = 4
 
     # preview of the inference of untrained models.
     plot_inference(
-        training_data, 
+        choice(training_data), 
         model, 
         prediction_length, 
         'social_model_before_train.png')
 
     plot_inference(
-        training_data, 
+        choice(training_data), 
         lstm_model, 
         prediction_length, 
         'lstm_predict_before_train.png')
@@ -105,15 +106,15 @@ def main():
     print("************* Training on Social LSTM ********************")
     # train the Social LSTM model
     social_train_losses, social_test_losses = train_test(
-        [training_data], [testing_data], 
-        model, optimizer, num_epochs, predict_length)
+        training_data, testing_data, 
+        model, optimizer, num_epochs, prediction_length)
     
     write_loss_to_csv(
         social_train_losses, social_test_losses, 
         './social_loss.csv')
     
     plot_inference(
-        training_data, 
+        choice(training_data), 
         model, 
         prediction_length, 
         'social_model_after_train.png')
@@ -121,7 +122,7 @@ def main():
 
     print("************* Training on Vanilla LSTM *******************")
     lstm_train_losses, lstm_test_losses = train_test(
-        [training_data], [testing_data], 
+        training_data, testing_data, 
         lstm_model, lstm_optimizer, num_epochs, prediction_length)
     
     write_loss_to_csv(
@@ -129,7 +130,7 @@ def main():
         './lstm_loss.csv')
     
     plot_inference(
-        training_data, 
+        choice(training_data), 
         lstm_model, 
         prediction_length, 
         'lstm_model_after_train.png')
@@ -188,7 +189,7 @@ def infer(data, model, predict_length):
 
     # predict steps
     predicted, hs, cs = model(
-        torch.zeros(observation.size(0), predict_length, 3), 
+        torch.zeros(observation.size(0), predict_length, 3).to(device), 
         (hs, cs), initial_coordinates = observation[:, -1, :2])
         
     return predicted
@@ -243,6 +244,9 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
 
     pbar = tqdm(training_data)
     for batch in pbar:
+
+        optimizer.zero_grad()
+
         batch = torch.from_numpy(batch).to(device).double()
         # print(batch.shape)
         observation, target = batch[:, :-(predict_length)], batch[:, -predict_length:]
