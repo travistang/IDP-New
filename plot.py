@@ -11,7 +11,7 @@ def get_normal(predicted_tensor, existing_tensor = None):
     sample_points = np.stack([x, y], axis = -1) # (240, 240, 2)
     res  = None
     for ts in range(predicted_tensor.size(0)):
-        mx, my, sx, sy, sxy = predicted_tensor[ts].detach().numpy().tolist()
+        mx, my, sx, sy, sxy = predicted_tensor[ts].detach().cpu().numpy().tolist()
         
         conv_mat =  np.array([[sx, sxy], [sxy, sy]])
         conv_mat = conv_mat @ conv_mat.T

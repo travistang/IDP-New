@@ -8,8 +8,15 @@ import h5py
 class Dataset():
 
     def __init__(self, dataset_path = './data/data_normalized.csv'):
-        self.data = pd.read_csv(dataset_path)
         
+        self.training_data = None
+        self.testing_data  = None
+
+        try:
+            self.data = pd.read_csv(dataset_path)
+        except:
+            self.data = None
+
     def normalize_coordaintes(self):
         '''
             Given a dataset loaded as self.data, normalize X and Y column so that their values are in [-1, 1]
@@ -97,6 +104,7 @@ class Dataset():
         
 if __name__ == '__main__':
     dataset = Dataset()
+    dataset.normalize_coordaintes()
     training_data, testing_data = dataset.get_train_validation_batch(20)
-    dataset.save_data(training_data, testing_data)
+    dataset.save_data(training_data, testing_data, to_file = './data_temp.h5')
     

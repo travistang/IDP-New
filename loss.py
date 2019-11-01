@@ -1,8 +1,9 @@
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 # import torch.nn.functional as F
+import numpy as np
 
-def Gaussian2DLoss(target_coord, prediction_tensor):
+def Gaussian2DLoss(target_coord, prediction_tensor, beta = 5, alpha = 1):
     '''
         Compute the negative log likelihood of (x, y) given bivariate gaussian with params (mx, my, sx, sy, sxy),
         The PDF is given by k * (sx * sy - sxy ** 2) ** -0.5 * exp(-0.5 * (mx - x) * (inv )) 
@@ -23,9 +24,18 @@ def Gaussian2DLoss(target_coord, prediction_tensor):
     pdf = MultivariateNormal(mean_vec, conv_mat)
 
     # the negative log likelihood loss
-    losses = (-pdf.log_prob(target_coord)).mean()
 
-    return losses
+    raw_probs = torch.exp(pdf.log_prob(target_coord))
+    # NLL loss
+    losses = (-pdf.log_prob(target_coord))
+    # breakpoint()
+    final_loss, _ = torch.min(torch.stack((
+        losses,
+        (beta - raw_probs * ((beta + np.log(alpha)) / alpha)).abs()
+    ), dim = -1), dim = -1)
+
+    final_loss = torch.mean(final_loss)
+    return final_loss
     
 def SocialModelLoss(pred, target):
     return torch.mean(
