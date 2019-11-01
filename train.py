@@ -13,13 +13,20 @@ import pandas as pd
 
 def plot_inference(data, model, prediction_length, fname):
     import matplotlib.pyplot as plt
-    from plot import plot_normal, plot_tracks
+    from plot import get_normal, plot_normal, plot_tracks
 
     plt.clf()
+
+    # the cumulative probability distribution of predictions in [-1, 1] x [-1, 1]
+    cum_track = None
     for track in infer(
         data[:, :-prediction_length], 
         model, prediction_length).split(1, dim = 0):
-        plot_normal(track[0])
+        res, x, y = get_normal(track[0])
+        cum_track = res if cum_track is None else res + cum_track
+
+    # the accumulate distribution
+    plt.contourf(x, y, cum_track)
     plot_tracks(data)
     plt.savefig(fname)
 

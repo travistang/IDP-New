@@ -3,7 +3,7 @@ from scipy.stats import multivariate_normal
 from threading import Thread
 import numpy as np
 
-def get_normal(predicted_tensor):
+def get_normal(predicted_tensor, existing_tensor = None):
     '''
         Plot the normal track of shape (ts, 5)
     '''
@@ -22,10 +22,13 @@ def get_normal(predicted_tensor):
         
         res = samples if res is None else (res + samples)
 
+    if existing_tensor is not None:
+        res = res + existing_tensor if res is not None else existing_tensor
+
     return res, x, y
     
-def plot_normal(predicted_tensor):
-    res, x, y = get_normal(predicted_tensor)
+def plot_normal(predicted_tensor, existing_tensor = None):
+    res, x, y = get_normal(predicted_tensor, existing_tensor = existing_tensor)
     plt.contourf(x, y, res)
 
 def plot_tracks(tracks):
