@@ -12,7 +12,6 @@ import pandas as pd
 
 def plot_inference(data, model, prediction_length, fname):
     import matplotlib.pyplot as plt
-<<<<<<< HEAD
     from plot import get_normal, plot_normal, plot_tracks
 
     plt.clf()
@@ -27,16 +26,6 @@ def plot_inference(data, model, prediction_length, fname):
 
     # the accumulate distribution
     plt.contourf(x, y, cum_track)
-=======
-    from plot import plot_normal, plot_tracks
-    plt.clf()
-    predictions = infer(
-        data[:, :-prediction_length], 
-        model, prediction_length).split(1, dim = 0)
-
-    for track in predictions:
-        plot_normal(track[0]) 
->>>>>>> cd4c19bbba0cc33998164d6c18356ca02e3a1ce8
     plot_tracks(data)
     plt.savefig(fname)
 
