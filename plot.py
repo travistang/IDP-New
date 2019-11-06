@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 from threading import Thread
 import numpy as np
+from models import gaussian_prediction
 
 def get_normal(predicted_tensor, existing_tensor = None):
     '''
@@ -11,12 +12,13 @@ def get_normal(predicted_tensor, existing_tensor = None):
     sample_points = np.stack([x, y], axis = -1) # (240, 240, 2)
     res  = None
     for ts in range(predicted_tensor.size(0)):
-        mx, my, sx, sy, sxy = predicted_tensor[ts].detach().cpu().numpy().tolist()
+        out = predicted_tensor[ts].view(1, -1).detach()
+        mean, cov = gaussian_prediction(out)
         
-        conv_mat =  np.array([[sx, sxy], [sxy, sy]])
-        conv_mat = conv_mat @ conv_mat.T
+        mean = mean.detach().cpu().numpy()
+        conv_mat = cov.detach().cpu().numpy()
 
-        rv = multivariate_normal([mx, my], conv_mat)
+        rv = multivariate_normal(mean[0], conv_mat[0])
 
         samples = rv.pdf(sample_points)
         
@@ -33,7 +35,7 @@ def plot_normal(predicted_tensor, existing_tensor = None):
 
 def plot_tracks(tracks):
     for ts in range(tracks.shape[0]):
-        plt.plot(tracks[ts, :, 0], tracks[ts, :, 1], 'ro--', linewidth = 1)
+        plt.plot(tracks[ts, :, 0], tracks[ts, :, 1], 'ro--', linewidth = 0.5)
 
 if __name__ == '__main__':
     import torch

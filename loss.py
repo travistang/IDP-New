@@ -2,6 +2,7 @@ import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 # import torch.nn.functional as F
 import numpy as np
+from models import gaussian_prediction
 
 def Gaussian2DLoss(target_coord, prediction_tensor, beta = 5, alpha = 1):
     '''
@@ -11,14 +12,9 @@ def Gaussian2DLoss(target_coord, prediction_tensor, beta = 5, alpha = 1):
         target_coord: (n, 2), in each row, it is (x, y)
         prediction_tensor: (n, 5), in each row, it is (mx, my, sx, sy, sxy)
     '''
-    mx, my, sx, sy, sxy = torch.split(prediction_tensor, 1, dim = 1) # each should be (n, 1)
 
-    # so it would be a (n, 2, 2) matrix, each n is a covariance matrix of that node.    
-    conv_mat = torch.stack([sx, sxy, sxy, sy], dim = -1).reshape(-1, 2, 2)
-    # so the predicted convariance matrix is always positive semidefinite
-    conv_mat = conv_mat @ torch.transpose(conv_mat, 1, 2)
-    # mean vector: (n, 2)
-    mean_vec = torch.stack([mx, my], dim = 1)[..., 0]
+    # get the modified prediction of the gaussian
+    mean_vec, conv_mat =  gaussian_prediction(prediction_tensor)
 
     # the bivariate pdf
     pdf = MultivariateNormal(mean_vec, conv_mat)
@@ -56,14 +52,9 @@ if __name__ == '__main__':
 
     n = 5
     pdf_configs = torch.randn(n, 5).double().requires_grad_(True)
-    # initial_config[:, -1] /= 10
-    # initial_config[:, 3] *= 
-    # pdf_configs = Variable(initial_config, requires_grad = True)
+
     optimizer = Adam([pdf_configs], lr = 1e-2)
-    # targets = torch.stack((
-    #         torch.ones(n),
-    #         torch.zeros(n)
-    #     ), dim = 1)
+
     targets = torch.randn(n, 2)
     
     print('before training...')

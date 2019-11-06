@@ -2,6 +2,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def gaussian_prediction(prediction_tensor):
+
+        # each should be (n, 1)
+        mx, my, sx, sy, sxy = torch.split(prediction_tensor, 1, dim = 1) 
+        
+        conv_mat = torch.stack([sx, sxy, sxy, sy], dim = -1).reshape(-1, 2, 2)
+
+        # add a small constant to the diagonals of the predicted covariance matrix to make it invertible
+        batch_eyes = torch.eye(2).reshape(1, 2, 2).repeat(conv_mat.size(0), 1, 1).to(prediction_tensor.device)
+        # so the predicted convariance matrix is always positive semidefinite
+        conv_mat = conv_mat @ torch.transpose(conv_mat, 1, 2) + batch_eyes * 1e-5
+
+        # mean vector: (n, 2)
+        mean_vec = torch.stack([mx, my], dim = 1)[..., 0]
+        return mean_vec, conv_mat
+
 class SocialLSTM(nn.Module):
 
     def __init__(self, hidden_size, grid_range, num_grids, embedding_size = 64):
@@ -91,11 +107,11 @@ class SocialLSTM(nn.Module):
 
 class SocialModel(nn.Module):
     
-    def __init__(self, embedding_size = 64):
+    def __init__(self, hidden_size = 128, embedding_size = 64):
         super(SocialModel, self).__init__()
 
         self.embedding_size = embedding_size
-        self.hidden_size = 128
+        self.hidden_size = hidden_size
         self.linear_intermediate_size = 64
 
         # coordinates to embedding
@@ -161,7 +177,7 @@ class SocialModel(nn.Module):
 
 class VanillaLSTMModel(nn.Module):
     
-    def __init__(self, hidden_size, intermediate_hidden_size, encoding_size = 64):
+    def __init__(self, hidden_size, encoding_size = 64):
         super(VanillaLSTMModel, self).__init__()
 
         self.wr = nn.Linear(3, encoding_size)

@@ -64,13 +64,59 @@ def generate_fake_data(num_trajectories, trajectory_length, prediction_length, m
 
     return training_data, testing_data
 
+def experiment(model, training_data, testing_data,
+    hidden_size = 128, 
+    embedding_size = 64, 
+    num_epochs = 100,
+    prediction_length = 10,
+    model_name = 'social_lstm'):
+    
+    print('*********************** Experiment on {}, Hidden Size: {}, Embedding Size: {} ************************'.format(
+        model_name, hidden_size, embedding_size
+    ))
+
+    # Common config
+    lr = 1e-4
+
+    optimizer = Adam(model.parameters(), lr)
+
+    model_config_name = "{}_{}_{}".format(model_name, hidden_size, embedding_size)
+
+    # preview prediction before train
+    plot_inference(
+        choice(training_data), 
+        model, 
+        prediction_length, 
+        "{}_before_train.png".format(model_config_name))     
+    
+    print("******* Start Training ***********")
+
+    training_loss, testing_loss = train_test(
+        training_data, testing_data, 
+        model, optimizer, 
+        num_epochs, prediction_length
+    )
+
+    write_loss_to_csv(
+        training_loss, testing_loss, 
+        "{}.csv".format(model_config_name)
+    )
+
+    plot_inference(
+        choice(training_data), 
+        model, 
+        prediction_length, 
+        '{}_after_train.png'.format(model_config_name))
+
+    # save weights
+    torch.save(model.state_dict(), '{}.pth'.format(model_config_name))
+
 def main():
     
     # metadata for training
     trajectory_length = 20
     prediction_length = trajectory_length // 2
 
-    # load the data
     print("************* Loading Dataset ***************")
     # training_data = [np.random.rand(17, 20, 2) for _ in range(10)]
     dataset = Dataset()
@@ -81,73 +127,41 @@ def main():
     training_data = training_data[:1000]
     testing_data  = testing_data[:100]
 
-    print("************* Preparing Model ***************")
+    # experiment configs 
+    experiment_embedding_size = [16, 32, 64]
+    experiment_hidden_size = [32, 64, 128]
 
-    # prepare a model
-    model = SocialModel()
-    lstm_model = VanillaLSTMModel(128, 64)
+    for embedding_size in experiment_embedding_size:
+        for hidden_size in experiment_hidden_size:
 
-    # and the optimizer
-    lr = 1e-4
-    optimizer = Adam(model.parameters(), lr)
-    lstm_optimizer = Adam(lstm_model.parameters(), lr)
+            social_model = SocialModel(
+                hidden_size = hidden_size, 
+                embedding_size = embedding_size)
+            
+            lstm_model = VanillaLSTMModel(hidden_size, embedding_size)
 
-    # training config
-    num_epochs = 100
+            experiment(
+                social_model, training_data, testing_data,
+                hidden_size = hidden_size,
+                embedding_size = embedding_size,
+                num_epochs = 20,
+                model_name = 'social_lstm'
+            )
 
-    # preview of the inference of untrained models.
-    plot_inference(
-        choice(training_data), 
-        model, 
-        prediction_length, 
-        'social_model_before_train.png')
-
-    plot_inference(
-        choice(training_data), 
-        lstm_model, 
-        prediction_length, 
-        'lstm_predict_before_train.png')
-
-
-    print("************* Training on Social LSTM ********************")
-    # train the Social LSTM model
-    social_train_losses, social_test_losses = train_test(
-        training_data, testing_data, 
-        model, optimizer, num_epochs, prediction_length)
-    
-    write_loss_to_csv(
-        social_train_losses, social_test_losses, 
-        './social_loss.csv')
-    
-    plot_inference(
-        choice(training_data), 
-        model, 
-        prediction_length, 
-        'social_model_after_train.png')
-
-
-    print("************* Training on Vanilla LSTM *******************")
-    lstm_train_losses, lstm_test_losses = train_test(
-        training_data, testing_data, 
-        lstm_model, lstm_optimizer, num_epochs, prediction_length)
-    
-    write_loss_to_csv(
-        lstm_train_losses, lstm_test_losses, 
-        './lstm_loss.csv')
-    
-    plot_inference(
-        choice(training_data), 
-        lstm_model, 
-        prediction_length, 
-        'lstm_model_after_train.png')
+            experiment(
+                lstm_model, training_data, testing_data,
+                hidden_size = hidden_size,
+                embedding_size = embedding_size,
+                num_epochs = 20,
+                model_name = 'vanilla_lstm' 
+            )
 
     print("done!")
 
     # print('Comparison: Social LSTM loss: {}, Vanilla LSTM loss: {}'.format(np.mean(social_test_losses), np.mean(lstm_test_losses)))
 
     # # save model
-    # torch.save(model.state_dict(), 'social_lstm.pth')
-    # torch.save(lstm_model.state_dict(), 'lstm.pth')
+
 
 
 def write_loss_to_csv(training_loss, testing_loss, csv_name):
@@ -196,7 +210,7 @@ def infer(data, model, predict_length):
     # predict steps
     predicted, hs, cs = model(
         torch.zeros(observation.size(0), predict_length, 3).to(device), 
-        (hs, cs), initial_coordinates = observation[:, -1, :2])
+        (hs, cs))
         
     return predicted
 
@@ -220,7 +234,7 @@ def test(testing_data, model, predict_length):
         # predict steps
         predicted, hs, cs = model(
             torch.zeros(batch.size(0), predict_length, 3).to(device), 
-            (hs, cs), initial_coordinates = observation[:, -1, :2])
+            (hs, cs))
         
         loss = SocialModelLoss(predicted, target)
         num_batches = observation.size(0)
@@ -266,7 +280,7 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
         # predict steps
         predicted, hs, cs = model(
             torch.zeros(batch.size(0), predict_length, 3).to(device), 
-            (hs, cs), initial_coordinates = observation[:, -1, :2])
+            (hs, cs))
 
         # print('predicted', predicted.shape)
         loss = SocialModelLoss(predicted, target)
