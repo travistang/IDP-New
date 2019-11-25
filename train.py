@@ -69,6 +69,9 @@ def experiment(model, training_data, testing_data,
     embedding_size = 64, 
     num_epochs = 100,
     prediction_length = 10,
+
+    random_rotation_angle = 40,
+
     model_name = 'social_lstm'):
     
     print('*********************** Experiment on {}, Hidden Size: {}, Embedding Size: {} ************************'.format(
@@ -82,6 +85,16 @@ def experiment(model, training_data, testing_data,
 
     model_config_name = "{}_{}_{}".format(model_name, hidden_size, embedding_size)
 
+    # augment data
+    training_data = [
+        rotate_trajectories(data, random_rotation_angle)
+        for data in training_data
+    ]
+    testing_data  = [
+        rotate_trajectories(data, random_rotation_angle)
+        for data in testing_data
+    ]
+    
     # preview prediction before train
     plot_inference(
         choice(training_data), 
@@ -111,6 +124,17 @@ def experiment(model, training_data, testing_data,
     # save weights
     torch.save(model.state_dict(), '{}.pth'.format(model_config_name))
 
+def rotate_trajectories(data, random_rotation_angle):
+    t = np.random.uniform(-random_rotation_angle, random_rotation_angle)
+    # to radian
+    t = t / 180 * np.pi
+    rot_mat = np.array([
+        [np.cos(t), -np.sin(t)],
+        [np.sin(t),  np.cos(t)]
+    ])
+    
+    return data @ rot_mat
+
 def main():
     
     # metadata for training
@@ -127,6 +151,7 @@ def main():
     # training_data = training_data[:1000]
     # testing_data  = testing_data[:100]
 
+    
     # experiment configs 
     experiment_embedding_size = [16, 32, 64, 128]
     experiment_hidden_size = [32, 64, 128, 256]
