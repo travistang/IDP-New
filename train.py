@@ -124,12 +124,12 @@ def main():
     training_data, testing_data = dataset.get_train_validation_batch(trajectory_length)
 
     # # reduce the size of training data..
-    training_data = training_data[:1000]
-    testing_data  = testing_data[:100]
+    # training_data = training_data[:1000]
+    # testing_data  = testing_data[:100]
 
     # experiment configs 
-    experiment_embedding_size = [16, 32, 64]
-    experiment_hidden_size = [32, 64, 128]
+    experiment_embedding_size = [16, 32, 64, 128]
+    experiment_hidden_size = [32, 64, 128, 256]
 
     for embedding_size in experiment_embedding_size:
         for hidden_size in experiment_hidden_size:
@@ -144,7 +144,7 @@ def main():
                 social_model, training_data, testing_data,
                 hidden_size = hidden_size,
                 embedding_size = embedding_size,
-                num_epochs = 20,
+                num_epochs = 100,
                 model_name = 'social_lstm'
             )
 
@@ -152,7 +152,7 @@ def main():
                 lstm_model, training_data, testing_data,
                 hidden_size = hidden_size,
                 embedding_size = embedding_size,
-                num_epochs = 20,
+                num_epochs = 100,
                 model_name = 'vanilla_lstm' 
             )
 
