@@ -85,16 +85,6 @@ def experiment(model, training_data, testing_data,
 
     model_config_name = "{}_{}_{}".format(model_name, hidden_size, embedding_size)
 
-    # augment data
-    training_data = [
-        rotate_trajectories(data, random_rotation_angle)
-        for data in training_data
-    ]
-    testing_data  = [
-        rotate_trajectories(data, random_rotation_angle)
-        for data in testing_data
-    ]
-    
     # preview prediction before train
     plot_inference(
         choice(training_data), 
@@ -133,7 +123,24 @@ def rotate_trajectories(data, random_rotation_angle):
         [np.sin(t),  np.cos(t)]
     ])
     
-    return data @ rot_mat
+    # rotate data 
+    rotated_data = data @ rot_mat
+    
+    n, ts, _ = rotated_data.shape
+
+    flattened_data = rotated_data.reshape(n * ts, 2)
+
+    # get min max for rescaling back to [-1, 1]
+    x_max, y_max = flattened_data.max(axis = 0)
+    x_min, y_min = flattened_data.min(axis = 0)
+
+    # re-interpolate coordinates in [-1, 1]
+    if x_max > 1 or x_min < -1:
+        rotated_data[..., 0] = 2 * (rotated_data[..., 0] - x_min) / (x_max - x_min) - 1
+    if y_max > 1 or y_min < -1:
+        rotated_data[..., 1] = 2 * (rotated_data[..., 1] - y_min) / (y_max - y_min) - 1
+
+    return rotated_data
 
 def main():
     
@@ -183,12 +190,6 @@ def main():
 
     print("done!")
 
-    # print('Comparison: Social LSTM loss: {}, Vanilla LSTM loss: {}'.format(np.mean(social_test_losses), np.mean(lstm_test_losses)))
-
-    # # save model
-
-
-
 def write_loss_to_csv(training_loss, testing_loss, csv_name):
     loss_data = {
         'training_loss': training_loss,
@@ -202,6 +203,19 @@ def train_test(training_data, testing_data, model, optimizer, num_epochs, predic
     testing_history  = []
 
     for epoch in range(num_epochs):
+        # augmentation - rotating data
+
+        random_rotation_angle = 270
+        training_data = [
+            rotate_trajectories(data, random_rotation_angle)
+            for data in training_data
+        ]
+
+        testing_data = [
+            rotate_trajectories(data, random_rotation_angle)
+            for data in testing_data
+        ]
+
         training_loss = train(training_data, model, optimizer, epoch, predict_length)
         testing_loss  = test(testing_data, model, predict_length)
         
@@ -328,4 +342,36 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
         
 if __name__ == '__main__':
     torch.set_default_tensor_type(torch.DoubleTensor)
-    main()
+
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('--inference', type = bool, default = False)
+    
+    args = parser.parse_args()
+    
+    if args.inference:
+        # do inference on random samples
+        trajectory_length = 20
+        random_rotation_angle = 270
+
+        # load data 
+        dataset = Dataset()
+        dataset.load_data('./data.h5')
+        training_data, testing_data = dataset.get_train_validation_batch(trajectory_length)
+        # random sample 
+        training_data = [
+            rotate_trajectories(data, random_rotation_angle)
+            for data in training_data
+        ]
+        # load random model
+        dummy_model = VanillaLSTMModel(16, 16)
+        for i in range(20):
+            plot_inference(
+                choice(training_data),
+                dummy_model,
+                trajectory_length // 2,
+                'sample_data_{}.png'.format(i + 1)
+            )
+    else:
+        
+        main()
