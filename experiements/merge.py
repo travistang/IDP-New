@@ -1,7 +1,13 @@
 import pandas as pd
 import glob
+import argparse
 
-path = r'.' # use your path
+parser = argparse.ArgumentParser()
+parser.add_argument('input_path')
+
+args = parser.parse_args()
+
+path = args.input_path # use your path
 all_files = glob.glob(path + "/*.csv")
 
 li = []
