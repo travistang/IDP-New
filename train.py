@@ -96,6 +96,7 @@ def experiment(model, training_data, testing_data,
     ]
     
     # preview prediction before train
+
     plot_inference(
         choice(training_data), 
         model, 
@@ -328,4 +329,9 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
         
 if __name__ == '__main__':
     torch.set_default_tensor_type(torch.DoubleTensor)
-    main()
+    dummy_model = VanillaLSTMModel(16)
+    for i in range(20):
+        training_data, testing_data = generate_fake_data(20, 20, 10, 0.05, 0.1)
+        training_data = rotate_trajectories(training_data)
+        plot_inference(training_data, dummy_model, 10, "fake_{}.png".format(i))
+    # main()
