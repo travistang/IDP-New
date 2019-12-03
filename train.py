@@ -262,12 +262,12 @@ def test(testing_data, model, predict_length):
     total_batches = 0
     for batch in tqdm(testing_data, desc = "Testing on validation set..."):
         batch = torch.from_numpy(batch).to(device).double()
-        # print(batch.shape)
+
         observation, target = batch[:, :-(predict_length + 1)], batch[:, -predict_length:]
         # add one extra dimension indicating the sequence is beginning
         pad = torch.ones(*observation.shape[:-1], 1).to(device).double()
         observation = torch.cat((observation, pad), axis = 2)
-        # print('target size', target.shape)
+
         # beforehand
         _, hs, cs = model(observation)
 
@@ -294,7 +294,7 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
     print("************* Start Training ***************")
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # print('training on {}'.format(device))
+
     model.to(device)
 
     shuffle(training_data)
@@ -308,7 +308,7 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
         optimizer.zero_grad()
 
         batch = torch.from_numpy(batch).to(device).double()
-        # print(batch.shape)
+
         observation, target = batch[:, :-(predict_length)], batch[:, -predict_length:]
         # add one extra dimension indicating the sequence is beginning
         pad = torch.ones(*observation.shape[:-1], 1).to(device).double()
@@ -322,7 +322,6 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
             torch.zeros(batch.size(0), predict_length, 3).to(device), 
             (hs, cs))
 
-        # print('predicted', predicted.shape)
         loss = SocialModelLoss(predicted, target)
         num_batches = observation.size(0)
         total_loss += loss.item() * num_batches
@@ -346,8 +345,8 @@ if __name__ == '__main__':
 
     from argparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('--inference', type = bool, default = False)
-    parser.add_argument('--dummy', type = bool, default = False)
+    parser.add_argument('--inference', default = False, action = 'store_true')
+    parser.add_argument('--dummy', default = False, action = 'store_true')
     args = parser.parse_args()
     
     if args.inference:
@@ -378,7 +377,7 @@ if __name__ == '__main__':
         else:
             for i in range(20):
                 training_data, testing_data = generate_fake_data(20, 20, 10, 0.05, 0.1)
-                training_data = rotate_trajectories(training_data)
+                training_data = rotate_trajectories(training_data, 270)
                 plot_inference(training_data, dummy_model, 10, "fake_{}.png".format(i))
     else:
         main()
