@@ -143,8 +143,8 @@ def rotate_trajectories(data, random_rotation_angle):
 
     return rotated_data
 
-def main():
-    
+def main(args):
+
     # metadata for training
     trajectory_length = 20
     prediction_length = trajectory_length // 2
@@ -152,7 +152,7 @@ def main():
     print("************* Loading Dataset ***************")
     # training_data = [np.random.rand(17, 20, 2) for _ in range(10)]
     dataset = Dataset()
-    dataset.load_data('./data.h5')
+    dataset.load_data(args.dataset)
     training_data, testing_data = dataset.get_train_validation_batch(trajectory_length)
 
     # # reduce the size of training data..
@@ -347,25 +347,22 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--inference', default = False, action = 'store_true')
     parser.add_argument('--dummy', default = False, action = 'store_true')
+    parser.add_argument('--dataset', type = str, default = './data_transformed.h5')
+    
     args = parser.parse_args()
     
     if args.inference:
         # do inference on random samples
         trajectory_length = 20
-        random_rotation_angle = 270
-
 
         dummy_model = VanillaLSTMModel(16, 16)
         # load data
         if not args.dummy:
             dataset = Dataset()
-            dataset.load_data('./data.h5')
+            dataset.load_data('./data_transformed.h5')
             training_data, testing_data = dataset.get_train_validation_batch(trajectory_length)
             # random sample 
-            training_data = [
-                rotate_trajectories(data, random_rotation_angle)
-                for data in training_data
-            ]
+            
             # load random model
             for i in range(20):
                 plot_inference(
@@ -377,7 +374,6 @@ if __name__ == '__main__':
         else:
             for i in range(20):
                 training_data, testing_data = generate_fake_data(20, 20, 10, 0.05, 0.1)
-                training_data = rotate_trajectories(training_data, 270)
                 plot_inference(training_data, dummy_model, 10, "fake_{}.png".format(i))
     else:
-        main()
+        main(args)

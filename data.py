@@ -21,16 +21,14 @@ class Dataset():
         '''
             Given a dataset loaded as self.data, normalize X and Y column so that their values are in [-1, 1]
         '''
+    
         self.data.X = (self.data.X - self.data.X.mean()) / (self.data.X.max() - self.data.X.min()) * 2
         self.data.Y = (self.data.Y - self.data.Y.mean()) / (self.data.Y.max() - self.data.Y.min()) * 2
         
         return self.data
 
     def get_train_validation_batch(self, seq_length, 
-        train_val_split = 0.8, 
-        # data augmentation
-        random_rotation_range = 0):
-
+        train_val_split = 0.8):
         '''
             Return Loaded data if it exists
         '''
@@ -70,20 +68,20 @@ class Dataset():
                 )
 
             # now this one should be of shape (n, seq_length, 2), where n is the number of unique cars seen in this particular timestamp.
-            res = np.array(trajectories) 
-            if random_rotation_range > 0:
-                t = np.random.uniform(-random_rotation_range, random_rotation_range)
-                t = t / 180 * np.pi
-                rot_mat = np.array([
-                    [np.cos(t), -np.sin(t)],
-                    [np.sin(t),  np.cos(t)]
-                ])
-                res = res @ rot_mat
+            res = np.array(trajectories)
             return res
+        
         print("************ aggregating data ***************")        
+        from utils import remove_irrelevant_trajectories, normalize_trajectories
+
         # map the function to all the starting timestamps in training and testing data
         training_data = [get_trajectories_from_timestamp(start_ts) for start_ts in tqdm(train_timestamp)]
+        training_data = remove_irrelevant_trajectories(training_data)
+        training_data = normalize_trajectories(training_data)
+
         testing_data  = [get_trajectories_from_timestamp(start_ts) for start_ts in tqdm(test_timestamp)]
+        testing_data  = remove_irrelevant_trajectories(testing_data)
+        testing_data  = normalize_trajectories(testing_data)
         
         print("************ done ***************")
         return training_data, testing_data
@@ -117,6 +115,7 @@ class Dataset():
 if __name__ == '__main__':
     dataset = Dataset()
     dataset.normalize_coordaintes()
-    training_data, testing_data = dataset.get_train_validation_batch(20, random_rotation_range = 30)
-    dataset.save_data(training_data, testing_data, to_file = './data_temp.h5')
+    training_data, testing_data = dataset.get_train_validation_batch(20)
+
+    dataset.save_data(training_data, testing_data, to_file = './data_transformed.h5')
     
