@@ -70,7 +70,7 @@ def experiment(model, training_data, testing_data,
     num_epochs = 100,
     prediction_length = 10,
 
-    random_rotation_angle = 40,
+    random_rotation_angle = None,
 
     model_name = 'social_lstm'):
     
@@ -86,9 +86,11 @@ def experiment(model, training_data, testing_data,
     model_config_name = "{}_{}_{}".format(model_name, hidden_size, embedding_size)
 
     # preview prediction before train
-
+    ploting_sample = choice(training_data)
+    if random_rotation_angle is not None:
+        ploting_sample = rotate_trajectories(ploting_sample, random_rotation_angle)
     plot_inference(
-        choice(training_data), 
+        ploting_sample, 
         model, 
         prediction_length, 
         "{}_before_train.png".format(model_config_name))     
@@ -98,7 +100,8 @@ def experiment(model, training_data, testing_data,
     training_loss, testing_loss = train_test(
         training_data, testing_data, 
         model, optimizer, 
-        num_epochs, prediction_length
+        num_epochs, prediction_length,
+        random_rotation_angle = random_rotation_angle
     )
 
     write_loss_to_csv(
@@ -107,7 +110,7 @@ def experiment(model, training_data, testing_data,
     )
 
     plot_inference(
-        choice(training_data), 
+        ploting_sample, 
         model, 
         prediction_length, 
         '{}_after_train.png'.format(model_config_name))
@@ -143,6 +146,9 @@ def rotate_trajectories(data, random_rotation_angle):
 
     return rotated_data
 
+'''
+    Main routine for training the models
+'''
 def main(args):
 
     # metadata for training
@@ -150,19 +156,20 @@ def main(args):
     prediction_length = trajectory_length // 2
 
     print("************* Loading Dataset ***************")
-    # training_data = [np.random.rand(17, 20, 2) for _ in range(10)]
     dataset = Dataset()
     dataset.load_data(args.dataset)
     training_data, testing_data = dataset.get_train_validation_batch(trajectory_length)
 
     # # reduce the size of training data..
-    # training_data = training_data[:1000]
-    # testing_data  = testing_data[:100]
+    if args.truncated:
+        print("Using truncated data")
+        training_data = training_data[:10]
+        testing_data  = testing_data[:10]
 
-    
+
     # experiment configs 
-    experiment_embedding_size = [16, 32, 64, 128]
-    experiment_hidden_size = [32, 64, 128, 256]
+    experiment_embedding_size = [64]
+    experiment_hidden_size = [128]
 
     for embedding_size in experiment_embedding_size:
         for hidden_size in experiment_hidden_size:
@@ -177,17 +184,19 @@ def main(args):
                 social_model, training_data, testing_data,
                 hidden_size = hidden_size,
                 embedding_size = embedding_size,
-                num_epochs = 100,
-                model_name = 'social_lstm'
+                num_epochs = args.epochs,
+                model_name = 'social_lstm',
+                random_rotation_angle = args.random_rotation_angle
             )
 
-            experiment(
-                lstm_model, training_data, testing_data,
-                hidden_size = hidden_size,
-                embedding_size = embedding_size,
-                num_epochs = 100,
-                model_name = 'vanilla_lstm' 
-            )
+            # experiment(
+            #     lstm_model, training_data, testing_data,
+            #     hidden_size = hidden_size,
+            #     embedding_size = embedding_size,
+            #     num_epochs = 100,
+            #     model_name = 'vanilla_lstm' 
+            #
+            # )
 
     print("done!")
 
@@ -199,23 +208,14 @@ def write_loss_to_csv(training_loss, testing_loss, csv_name):
 
     pd.DataFrame(data = loss_data).to_csv(csv_name)
 
-def train_test(training_data, testing_data, model, optimizer, num_epochs, predict_length):
+def train_test(training_data, testing_data, model, optimizer, num_epochs, predict_length, 
+    *,
+    random_rotation_angle = None
+):
     training_history = []
     testing_history  = []
 
     for epoch in range(num_epochs):
-        # augmentation - rotating data
-
-        random_rotation_angle = 270
-        training_data = [
-            rotate_trajectories(data, random_rotation_angle)
-            for data in training_data
-        ]
-
-        testing_data = [
-            rotate_trajectories(data, random_rotation_angle)
-            for data in testing_data
-        ]
 
         training_loss = train(training_data, model, optimizer, epoch, predict_length)
         testing_loss  = test(testing_data, model, predict_length)
@@ -254,13 +254,16 @@ def infer(data, model, predict_length):
         
     return predicted
 
-def test(testing_data, model, predict_length):
+def test(testing_data, model, predict_length, random_rotation_angle = None):
     print("************* Start Testing ***************")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
     total_loss = 0
     total_batches = 0
     for batch in tqdm(testing_data, desc = "Testing on validation set..."):
+        if random_rotation_angle is not None:
+            batch = rotate_trajectories(batch, random_rotation_angle)
+        
         batch = torch.from_numpy(batch).to(device).double()
 
         observation, target = batch[:, :-(predict_length + 1)], batch[:, -predict_length:]
@@ -283,7 +286,7 @@ def test(testing_data, model, predict_length):
 
     return total_loss / total_batches
 
-def train(training_data, model, optimizer, num_epochs, predict_length):
+def train(training_data, model, optimizer, num_epochs, predict_length, random_rotation_angle = None):
     '''
         Train on a list / iterator of trainin data.
         the shape of the training data should be of type
@@ -304,7 +307,9 @@ def train(training_data, model, optimizer, num_epochs, predict_length):
 
     pbar = tqdm(training_data)
     for batch in pbar:
-
+        if random_rotation_angle is not None:
+            batch = rotate_trajectories(batch, random_rotation_angle)
+        
         optimizer.zero_grad()
 
         batch = torch.from_numpy(batch).to(device).double()
@@ -348,7 +353,9 @@ if __name__ == '__main__':
     parser.add_argument('--inference', default = False, action = 'store_true')
     parser.add_argument('--dummy', default = False, action = 'store_true')
     parser.add_argument('--dataset', type = str, default = './data_transformed.h5')
-    
+    parser.add_argument('--random_rotation_angle', type = float, default = None)
+    parser.add_argument('--epochs', type = int, default = 100)
+    parser.add_argument('--truncated', action = 'store_true')
     args = parser.parse_args()
     
     if args.inference:
