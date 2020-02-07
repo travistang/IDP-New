@@ -6,3 +6,4 @@ env_bak/
 *.csv
 *.png
 .*
+node_modules/

@@ -34,16 +34,19 @@ def plot_normal(predicted_tensor, existing_tensor = None):
     plt.contourf(x, y, res)
 
 def plot_tracks(tracks):
-    for ts in range(tracks.shape[0]):
-        plt.plot(tracks[ts, :, 0], tracks[ts, :, 1], 'ro--', linewidth = 0.5)
+    num_vehicles = tracks.shape[0]
+    num_steps    = tracks.shape[1]
+    for v in range(num_vehicles):
+        for ts in range(tracks.shape[1] - 2):
+            plt.plot(
+                tracks[v, ts: (ts + 2), 0], tracks[v, ts: (ts + 2), 1], 
+                '--', 
+                color = (1 - ts * (1 / num_steps), ts * (1 / num_steps), 0), 
+                linewidth = 1.2)
 
 if __name__ == '__main__':
     import torch
     batch_size = 7
-    # means  = torch.randn(batch_size, 2)
-    # sx, sy = torch.split(torch.randn(batch_size, 2), 1, dim = 1) 
-    # sxy    = torch.randn(batch_size, 1)
-    # input_tensor = torch.cat((means, sx, sy, sxy), dim = 1)
     input_tensor = torch.randn(batch_size, 5)
     res, x, y = get_normal(input_tensor)
     print(res.max(), res.min())

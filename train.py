@@ -3,10 +3,10 @@ import numpy as np
 from models import SocialLSTM, SocialModel, VanillaLSTMModel
 from loss import Gaussian2DLoss, SocialModelLoss
 from data import Dataset
+from reporter import Reporter
 from random import shuffle, choice
 from torch.optim import Adam
 from tqdm import tqdm
-
 
 import pandas as pd
 
@@ -64,46 +64,34 @@ def generate_fake_data(num_trajectories, trajectory_length, prediction_length, m
 
     return training_data, testing_data
 
-def experiment(model, training_data, testing_data,
-    hidden_size = 128, 
-    embedding_size = 64, 
-    num_epochs = 100,
-    prediction_length = 10,
-
-    random_rotation_angle = None,
-
+def experiment(model, training_data, testing_data, 
+    hidden_size, embedding_size, 
+    args,
     model_name = 'social_lstm'):
     
     print('*********************** Experiment on {}, Hidden Size: {}, Embedding Size: {} ************************'.format(
         model_name, hidden_size, embedding_size
     ))
 
-    # Common config
-    lr = 1e-4
-
-    optimizer = Adam(model.parameters(), lr)
+    optimizer = Adam(model.parameters(), args.lr)
 
     model_config_name = "{}_{}_{}".format(model_name, hidden_size, embedding_size)
 
     # preview prediction before train
     ploting_sample = choice(training_data)
-    if random_rotation_angle is not None:
-        ploting_sample = rotate_trajectories(ploting_sample, random_rotation_angle)
+    if args.random_rotation_angle is not None:
+        ploting_sample = rotate_trajectories(ploting_sample, args.random_rotation_angle)
     plot_inference(
         ploting_sample, 
         model, 
-        prediction_length, 
+        args.prediction_length, 
         "{}_before_train.png".format(model_config_name))     
     
-    print("******* Start Training ***********")
-
     training_loss, testing_loss = train_test(
         training_data, testing_data, 
-        model, optimizer, 
-        num_epochs, prediction_length,
-        random_rotation_angle = random_rotation_angle
-    )
+        model, optimizer, args, model_name = model_name)
 
+    print ("*************** Experiment Complete. Recording results ***************")
     write_loss_to_csv(
         training_loss, testing_loss, 
         "{}.csv".format(model_config_name)
@@ -112,7 +100,7 @@ def experiment(model, training_data, testing_data,
     plot_inference(
         ploting_sample, 
         model, 
-        prediction_length, 
+        args.prediction_length, 
         '{}_after_train.png'.format(model_config_name))
 
     # save weights
@@ -168,8 +156,10 @@ def main(args):
 
 
     # experiment configs 
-    experiment_embedding_size = [64]
-    experiment_hidden_size = [128]
+    # experiment_embedding_size = [64]
+    # experiment_hidden_size = [128]
+    experiment_embedding_size = args.embedding_size
+    experiment_hidden_size = args.hidden_size
 
     for embedding_size in experiment_embedding_size:
         for hidden_size in experiment_hidden_size:
@@ -178,24 +168,21 @@ def main(args):
                 hidden_size = hidden_size, 
                 embedding_size = embedding_size)
             
-            lstm_model = VanillaLSTMModel(hidden_size, embedding_size)
-
             experiment(
                 social_model, training_data, testing_data,
-                hidden_size = hidden_size,
-                embedding_size = embedding_size,
-                num_epochs = args.epochs,
-                model_name = 'social_lstm',
-                random_rotation_angle = args.random_rotation_angle
+                hidden_size, embedding_size,
+                args,
+                model_name = 'social_lstm'
             )
 
+            # lstm_model = VanillaLSTMModel(hidden_size, embedding_size)
             # experiment(
             #     lstm_model, training_data, testing_data,
             #     hidden_size = hidden_size,
             #     embedding_size = embedding_size,
             #     num_epochs = 100,
-            #     model_name = 'vanilla_lstm' 
-            #
+            #     lr = args.lr,
+            #     model_name = 'vanilla_lstm',
             # )
 
     print("done!")
@@ -208,23 +195,20 @@ def write_loss_to_csv(training_loss, testing_loss, csv_name):
 
     pd.DataFrame(data = loss_data).to_csv(csv_name)
 
-def train_test(training_data, testing_data, model, optimizer, num_epochs, predict_length, 
-    *,
-    random_rotation_angle = None
-):
+def train_test(training_data, testing_data, model, optimizer, args, **kwargs):
     training_history = []
     testing_history  = []
 
-    for epoch in range(num_epochs):
+    for epoch in range(args.epochs):
 
-        training_loss = train(training_data, model, optimizer, epoch, predict_length)
-        testing_loss  = test(testing_data, model, predict_length)
+        training_loss = train(training_data, model, optimizer, args, epoch, **kwargs)
+        testing_loss  = test(testing_data, model, args, epoch, **kwargs)
         
         training_history.append(training_loss)
         testing_history.append(testing_loss)
 
-        print('Epoch {}: Training loss: {}, Testing loss: {}'.format(
-            epoch, training_loss, testing_loss
+        print('Epoch {} / {}: Training loss: {}, Testing loss: {}'.format(
+            epoch, args.epochs, training_loss, testing_loss
         ))
 
     return training_history, testing_history
@@ -233,7 +217,6 @@ def infer(data, model, predict_length):
     '''
         Treat the whole data as observation, infer `predict_length` steps
     '''
-    print("************* Inference ***************")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     model.to(device)
@@ -254,13 +237,20 @@ def infer(data, model, predict_length):
         
     return predicted
 
-def test(testing_data, model, predict_length, random_rotation_angle = None):
+def test(testing_data, model, args, epoch, **kwargs):
     print("************* Start Testing ***************")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
+
+    predict_length          = args.prediction_length
+    random_rotation_angle   = args.random_rotation_angle
+    reporter                = Reporter("ws://localhost:8080") if args.remote_monitor else None
+
     total_loss = 0
     total_batches = 0
-    for batch in tqdm(testing_data, desc = "Testing on validation set..."):
+    for batch_id, batch in enumerate(
+        tqdm(testing_data, desc = "Testing on validation set...")
+    ):
         if random_rotation_angle is not None:
             batch = rotate_trajectories(batch, random_rotation_angle)
         
@@ -280,13 +270,20 @@ def test(testing_data, model, predict_length, random_rotation_angle = None):
             (hs, cs))
         
         loss = SocialModelLoss(predicted, target)
+        
+        if reporter:
+            reporter.report(
+                model_name = kwargs['model_name'] + '_test', 
+                loss = loss.item(), 
+                batch_id = batch_id, epoch = epoch)
+
         num_batches = observation.size(0)
         total_loss += loss.item() * num_batches
         total_batches += num_batches
 
     return total_loss / total_batches
 
-def train(training_data, model, optimizer, num_epochs, predict_length, random_rotation_angle = None):
+def train(training_data, model, optimizer, args, epoch):
     '''
         Train on a list / iterator of trainin data.
         the shape of the training data should be of type
@@ -296,6 +293,12 @@ def train(training_data, model, optimizer, num_epochs, predict_length, random_ro
     '''
     print("************* Start Training ***************")
     
+    # destructure args
+    num_epochs              = args.epochs
+    predict_length          = args.prediction_length
+    batch_size              = args.batch_size
+    random_rotation_angle   = args.random_rotation_angle
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     model.to(device)
@@ -303,36 +306,51 @@ def train(training_data, model, optimizer, num_epochs, predict_length, random_ro
     shuffle(training_data)
 
     total_loss = 0
-    total_batches = 0
+    total_num_vehicles = 0
 
-    pbar = tqdm(training_data)
-    for batch in pbar:
-        if random_rotation_angle is not None:
-            batch = rotate_trajectories(batch, random_rotation_angle)
+    pbar = tqdm(range(0, len(training_data), batch_size))
+
+    reporter = Reporter("ws://localhost:8080") if args.remote_monitor else None
+
+    for start_id in pbar:
+        batch_data = training_data[start_id: start_id + batch_size]
+        # aggregate the batch loss here
+        batch_loss = []
+        for batch_id, batch in enumerate(batch_data):
+            # augment if needed
+            if random_rotation_angle is not None:
+                batch = rotate_trajectories(batch, random_rotation_angle)
         
-        optimizer.zero_grad()
+            optimizer.zero_grad()
 
-        batch = torch.from_numpy(batch).to(device).double()
+            batch = torch.from_numpy(batch).to(device).double()
 
-        observation, target = batch[:, :-(predict_length)], batch[:, -predict_length:]
-        # add one extra dimension indicating the sequence is beginning
-        pad = torch.ones(*observation.shape[:-1], 1).to(device).double()
-        observation = torch.cat((observation, pad), axis = 2)
+            observation, target = batch[:, :-(predict_length)], batch[:, -predict_length:]
+            # add one extra dimension indicating the sequence is beginning
+            pad = torch.ones(*observation.shape[:-1], 1).to(device).double()
+            observation = torch.cat((observation, pad), axis = 2)
 
-        # beforehand
-        _, hs, cs = model(observation)
+            # beforehand
+            _, hs, cs = model(observation)
 
-        # predict steps
-        predicted, hs, cs = model(
-            torch.zeros(batch.size(0), predict_length, 3).to(device), 
-            (hs, cs))
+            # predict steps
+            predicted, hs, cs = model(
+                torch.zeros(batch.size(0), predict_length, 3).to(device), 
+                (hs, cs))
 
-        loss = SocialModelLoss(predicted, target)
-        num_batches = observation.size(0)
-        total_loss += loss.item() * num_batches
-        total_batches += num_batches
-        # compute gradient
-        loss.backward()
+            loss = SocialModelLoss(predicted, target)
+            num_vehicles = observation.size(0)
+            total_loss += loss.item() * num_vehicles
+            total_num_vehicles += num_vehicles
+            loss.backward()
+
+            if reporter:
+                reporter.report(
+                    model_name = "social lstm",
+                    loss = loss.item(),
+                    batch_id = start_id + batch_id, 
+                    epoch = epoch,  
+                )
 
         # clip gradient
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
@@ -341,28 +359,52 @@ def train(training_data, model, optimizer, num_epochs, predict_length, random_ro
         optimizer.step()
 
         # update progress bar
-        pbar.set_description('Epoch: {}, loss: {}'.format(num_epochs, total_loss / total_batches))
+        pbar.set_description('Epoch: {} / {}, loss: {:.3f}'.format(epoch + 1, num_epochs, total_loss / total_num_vehicles))
 
-    return total_loss / total_batches
+    return total_loss / total_num_vehicles
         
 if __name__ == '__main__':
     torch.set_default_tensor_type(torch.DoubleTensor)
 
     from argparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('--inference', default = False, action = 'store_true')
-    parser.add_argument('--dummy', default = False, action = 'store_true')
-    parser.add_argument('--dataset', type = str, default = './data_transformed.h5')
-    parser.add_argument('--random_rotation_angle', type = float, default = None)
-    parser.add_argument('--epochs', type = int, default = 100)
-    parser.add_argument('--truncated', action = 'store_true')
-    args = parser.parse_args()
+    subparsers = parser.add_subparsers(title = "mode")
     
-    if args.inference:
-        # do inference on random samples
-        trajectory_length = 20
+    inference_parser = subparsers.add_parser('inference')
+    inference_parser.set_defaults(which = 'inference')
+    inference_parser.add_argument('--model_path', type = str, required = True)
+    inference_parser.add_argument('--dummy', default = False, action = 'store_true')
+    inference_parser.add_argument('--embedding_size', type = int, required = True)
+    inference_parser.add_argument('--hidden_size', type = int, required = True)
+    inference_parser.add_argument('--trajectory_length', type = int, default = 20)
+    inference_parser.add_argument('--prediction_length', type = int, default = 10)
 
-        dummy_model = VanillaLSTMModel(16, 16)
+    train_parser = subparsers.add_parser("train")
+    train_parser.set_defaults(which = 'train')
+    train_parser.add_argument('--model_path', type = str, help = "The weights for model to finetune on")
+    train_parser.add_argument('--dataset', type = str, default = './data_transformed.h5')
+    train_parser.add_argument('--random_rotation_angle', type = float, default = 270)
+    train_parser.add_argument('--epochs', type = int, default = 100)
+    train_parser.add_argument('--truncated', action = 'store_true')
+    train_parser.add_argument('--lr', type = float, default = 1e-4, help = 'learning rate')
+    train_parser.add_argument('--batch_size', type = int, default = 16)
+    train_parser.add_argument('--remote_monitor', action = 'store_true', help = 'Use Remote Monitor')
+    train_parser.add_argument('--trajectory_length', type = int, default = 20)
+    train_parser.add_argument('--prediction_length', type = int, default = 10)
+    train_parser.add_argument('--embedding_size', type = int, required = True, nargs = '+')
+    train_parser.add_argument('--hidden_size', type = int, required = True, nargs = '+')
+    
+    args = parser.parse_args()
+
+    if args.which is 'inference':
+        # do inference on random samples
+        trajectory_length = args.trajectory_length
+        prediction_length = args.prediction_length
+
+        model = SocialModel(args.embedding_size, args.hidden_size)
+        with open(args.model_path, 'rb') as f:
+            state_dict = torch.load(f)
+            model.load_state_dict(state_dict)
         # load data
         if not args.dummy:
             dataset = Dataset()
@@ -371,16 +413,16 @@ if __name__ == '__main__':
             # random sample 
             
             # load random model
-            for i in range(20):
+            for i in tqdm(range(20), desc = "Inferring..."):
                 plot_inference(
                     choice(training_data),
-                    dummy_model,
-                    trajectory_length // 2,
+                    model,
+                    prediction_length,
                     'sample_data_{}.png'.format(i + 1)
                 )
         else:
             for i in range(20):
                 training_data, testing_data = generate_fake_data(20, 20, 10, 0.05, 0.1)
-                plot_inference(training_data, dummy_model, 10, "fake_{}.png".format(i))
+                plot_inference(training_data, model, args.prediction_length, "fake_{}.png".format(i))
     else:
         main(args)
